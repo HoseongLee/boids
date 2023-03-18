@@ -1,0 +1,211 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+    </head>
+    <body>
+        <style>
+            html, head, body {
+                margin: 0px;
+                width: 100%;
+                height: 100%;
+            }
+
+            #wallpaper {
+                position: absolute;
+                left: 0;
+                top: 0;
+                background-color: black;
+            }
+
+            #border {
+                position: absolute;
+                left: 0;
+                top: 0;
+                background-color: transparent;
+            }
+
+            div {
+                overflow: auto;
+            }
+
+            .slider {
+                float: right;
+                margin-top: 20px;
+                margin-right: 60px;
+            }
+
+            output {
+                float: right;
+                margin-top: 20px;
+                margin-right: 0px;
+            }
+        </style>
+
+        <canvas id="r" style="display:none"></canvas>
+        <canvas id="g" style="display:none"></canvas>
+        <canvas id="b" style="display:none"></canvas>
+
+        <canvas width="1620", height="1080", id="wallpaper"></canvas>
+        <canvas width="1620", height="1080", id="border"></canvas>
+        
+        <div>
+            <div>
+                <input class="slider" id="seperation" type="range" min="-20", max="20",  oninput="this.nextElementSibling.value = this.value">
+                <output id="seperation_out"></output>
+            </div>
+            <div>
+                <input class="slider" id="cohesion" type="range" min="-1", max="1", step="0.01",  oninput="this.nextElementSibling.value = this.value">
+                <output id="cohesion_out"></output>
+            </div>
+            <div>
+                <input class="slider" id="align" type="range" min="-2", max="2", step="0.1",  oninput="this.nextElementSibling.value = this.value">
+                <output id="align_out"></output>
+            </div>
+            <div>
+                <input class="slider" id="pred" type="range" min="-2", max="2", step="0.1",  oninput="this.nextElementSibling.value = this.value">
+                <output id="pred_out"></output>
+            </div>
+            <div>
+                <input class="slider" id="prey" type="range" min="-2", max="2", step="0.1",  oninput="this.nextElementSibling.value = this.value">
+                <output id="prey_out"></output>
+            </div>
+        </div>
+
+        <script type="module">
+import init, { Flock } from "./pkg/wallpaper.js"
+
+await init();
+
+const BOID_COUNT = 9000;
+const SEPERATION_FORCE = 8.0;
+const COHESION_FORCE = 0.05;
+const ALIGN_FORCE = 0.2;
+
+const PRED_FORCE = 0.05;
+const PREY_FORCE = 0.05;
+
+const seperation_slider = document.getElementById("seperation");
+const cohesion_slider = document.getElementById("cohesion");
+const align_slider = document.getElementById("align");
+const pred_slider = document.getElementById("pred");
+const prey_slider = document.getElementById("prey");
+
+seperation_slider.value = SEPERATION_FORCE;
+cohesion_slider.value = COHESION_FORCE;
+align_slider.value = ALIGN_FORCE;
+pred_slider.value = PRED_FORCE;
+prey_slider.value = PREY_FORCE;
+
+document.getElementById("seperation_out").value = SEPERATION_FORCE;
+document.getElementById("cohesion_out").value = COHESION_FORCE;
+document.getElementById("align_out").value = ALIGN_FORCE;
+document.getElementById("pred_out").value = PRED_FORCE;
+document.getElementById("prey_out").value = PREY_FORCE;
+
+const canvas = document.getElementById("wallpaper");
+const ctx = canvas.getContext("2d");
+
+const flock = new Flock();
+
+for (let i=0; i < BOID_COUNT; ++i) {
+    flock.add_boid(Math.floor(Math.random() * 3), Math.random(), Math.random(), Math.random() * 2 - 1, Math.random() * 2 - 1);
+}
+
+let last = performance.now() / 1000;
+let fpsThreshold = 0;
+
+const fps = 30;
+const spf = 1 / fps;
+
+function step() {
+    window.requestAnimationFrame(step);
+
+    const now = performance.now() / 1000;
+    const dt = Math.min(now - last, 1);
+
+    last = now;
+
+    fpsThreshold += dt;
+
+    if (fpsThreshold < spf) {
+        return;
+    }
+
+    fpsThreshold -= spf;
+
+    ctx.clearRect(0, 0, 1620, 1080);
+    flock.update(seperation_slider.value, cohesion_slider.value, align_slider.value, pred_slider.value, prey_slider.value);
+    flock.render();
+}
+
+window.onload = function() {
+    window.requestAnimationFrame(step);
+};
+
+window.requestAnimationFrame(step);
+        </script>
+        <script>
+const canvas = document.getElementById("wallpaper");
+const ctx = canvas.getContext("2d");
+
+const border = document.getElementById("border");
+const border_ctx = border.getContext("2d");
+
+border_ctx.fillStyle = 'black';
+
+border_ctx.fillRect(0, 0, 1620, 10);
+border_ctx.fillRect(0, 0, 10, 1080);
+
+const rCanvas = document.getElementById("r");
+const gCanvas = document.getElementById("g");
+const bCanvas = document.getElementById("b");
+
+const rCtx = rCanvas.getContext('2d');
+const gCtx = gCanvas.getContext('2d');
+const bCtx = bCanvas.getContext('2d');
+
+const size = 10;
+const half_size = size / 2;
+
+bCanvas.width  = size;
+
+rCanvas.height = size;
+gCanvas.height = size;
+bCanvas.height = size;
+
+const rGrad = rCtx.createRadialGradient(half_size, half_size, 0, half_size, half_size, half_size);
+const gGrad = rCtx.createRadialGradient(half_size, half_size, 0, half_size, half_size, half_size);
+const bGrad = rCtx.createRadialGradient(half_size, half_size, 0, half_size, half_size, half_size);
+
+rGrad.addColorStop(0, "#FF0000FF");
+gGrad.addColorStop(0, "#00FF00FF");
+bGrad.addColorStop(0, "#0000FFFF");
+
+rGrad.addColorStop(1, "#FFFFFF00");
+gGrad.addColorStop(1, "#FFFFFF00");
+bGrad.addColorStop(1, "#FFFFFF00");
+
+rCtx.fillStyle = rGrad;
+gCtx.fillStyle = gGrad;
+bCtx.fillStyle = bGrad;
+
+rCtx.fillRect(0, 0, size, size);
+gCtx.fillRect(0, 0, size, size);
+bCtx.fillRect(0, 0, size, size);
+
+function draw(c, x, y) {
+    if (c == 0) {
+        ctx.drawImage(rCanvas, Math.round(x - half_size), Math.round(y - half_size));
+    }
+
+    else if (c == 1) {
+        ctx.drawImage(gCanvas, Math.round(x - half_size), Math.round(y - half_size));
+    }
+
+    else {
+        ctx.drawImage(bCanvas, Math.round(x - half_size), Math.round(y - half_size));
+    }
+}
+        </script>
+    </body>
+</html>
