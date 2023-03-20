@@ -9,16 +9,6 @@ crate-type = [ "cdylib" ]
 [dependencies]
 wasm-bindgen = "0.2.84"
 
-[dependencies.web-sys]
-version = "0.3.61"
-features = [
-    'CanvasRenderingContext2d',
-    'Document',
-    'Element',
-    'HtmlCanvasElement',
-    'Window',
-]
-
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
 
