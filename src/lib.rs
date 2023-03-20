@@ -1,19 +1,11 @@
 use std::process;
+use core::arch::wasm32::*;
 use wasm_bindgen::prelude::*;
 
 const VISION_RANGE: f32 = 60.0;
 const CONVERT_RANGE: f32 = 10.0;
 
-const MAX_SPEED: f32 = 1.0;
-
-/*
-const SEPERATION_FORCE: f32 = 8.0;
-const COHESION_FORCE: f32 = 0.05;
-const ALIGN_FORCE: f32 = 0.2;
-
-const PREY_FORCE: f32 = 0.05;
-const PRED_FORCE: f32 = 0.05;
-*/
+const MAX_SPEED: f32 = 10.0;
 
 const WIDTH: f32 = 1620.0;
 const HEIGHT: f32 = 1080.0;
@@ -31,102 +23,60 @@ pub fn unwrap_abort<T>(option: Option<T>) -> T {
     }
 }
 
-#[derive(Copy, Clone)]
-struct Vector2 {
-    x: f32,
-    y: f32,
-}
-
-impl Vector2 {
-    fn new(x: f32, y: f32) -> Self {
-        Vector2 { x, y }
-    }
-
-    fn sub(&self, other: Vector2) -> Vector2 {
-        Vector2::new(self.x - other.x, self.y - other.y)
-    }
-
-    fn mul(&self, scalar: f32) -> Vector2 {
-        Vector2::new(scalar * self.x, scalar * self.y)
-    }
-
-    fn add_mut(&mut self, other: Vector2) {
-        self.x += other.x;
-        self.y += other.y;
-    }
-
-    fn sub_mut(&mut self, other: Vector2) {
-        self.x -= other.x;
-        self.y -= other.y;
-    }
-
-    fn mul_mut(&mut self, scalar: f32) {
-        self.x *= scalar;
-        self.y *= scalar;
-    }
-
-    fn length_squared(&self) -> f32 {
-        self.x * self.x + self.y * self.y
-    }
-
-    fn length(&self) -> f32 {
-        (self.x * self.x + self.y * self.y).sqrt()
-    }
-
-    fn distance_to(&self, other: &Vector2) -> f32 {
-        ((self.x - other.x).powi(2) + (self.y - other.y).powi(2)).sqrt()
-    }
-}
-
 struct Boid {
-    hand: u8,
+    hand: u32,
     hash: usize,
-    position: Vector2,
-    velocity: Vector2,
+    position_x: f32,
+    position_y: f32,
+    velocity_x: f32,
+    velocity_y: f32,
 }
 
 impl Boid {
-    fn new(hand: u8, position: Vector2, velocity: Vector2) -> Self {
+    fn new(hand: u32, position_x: f32, position_y: f32, velocity_x: f32, velocity_y: f32) -> Self {
         let mut boid = Boid {
             hand,
             hash: 0,
-            position,
-            velocity,
+            position_x,
+            position_y,
+            velocity_x,
+            velocity_y,
         };
+
         boid.rehash();
+
         boid
     }
 
     fn rehash(&mut self) {
-        let x = (self.position.x / VISION_RANGE) as usize;
-        let y = (self.position.y / VISION_RANGE) as usize;
-
-        self.hash = x + GRID_ROWS * y;
+        self.hash = (self.position_x / VISION_RANGE) as usize + GRID_ROWS * (self.position_y / VISION_RANGE) as usize;
     }
 
-    fn update(&mut self, acceleration: Vector2) {
-        self.position.x += self.velocity.x;
-        self.position.y += self.velocity.y;
+    fn update(&mut self, acceleration_x: f32, acceleration_y: f32) {
+        self.position_x += self.velocity_x;
+        self.position_y += self.velocity_y;
 
-        self.position.x = self.position.x.rem_euclid(WIDTH);
-        self.position.y = self.position.y.rem_euclid(HEIGHT);
+        self.position_x = self.position_x.rem_euclid(WIDTH);
+        self.position_y = self.position_y.rem_euclid(HEIGHT);
 
-        if self.position.x == WIDTH {
-            self.position.x -= 1e3;
+        if self.position_x == WIDTH {
+            self.position_x -= 1e3;
         }
 
-        if self.position.y == HEIGHT {
-            self.position.y -= 1e3;
+        if self.position_y == HEIGHT {
+            self.position_y -= 1e3;
         }
 
         self.rehash();
 
-        self.velocity.add_mut(acceleration);
+        self.velocity_x += acceleration_x;
+        self.velocity_y += acceleration_y;
 
-        let speed = self.velocity.length();
+        let speed = (self.velocity_x * self.velocity_x + self.velocity_y * self.velocity_y).sqrt();
 
         if speed > MAX_SPEED {
-            self.velocity.mul_mut(MAX_SPEED / speed);
+            self.velocity_x *= MAX_SPEED / speed;
+            self.velocity_y *= MAX_SPEED / speed;
         }
     }
 }
@@ -151,7 +101,7 @@ impl Flock {
 
     pub fn add_boid(
         &mut self,
-        hand: u8,
+        hand: u32,
         position_x: f32,
         position_y: f32,
         velocity_x: f32,
@@ -159,39 +109,39 @@ impl Flock {
     ) {
         let boid = Boid::new(
             hand,
-            Vector2::new(position_x * WIDTH, position_y * HEIGHT),
-            Vector2::new(velocity_x, velocity_y),
+            position_x,
+            position_y,
+            velocity_x,
+            velocity_y,
         );
+
         unwrap_abort(self.table.get_mut(boid.hash)).push(self.count);
+
         self.count += 1;
         self.boids.push(boid);
     }
 
     pub fn render(&self) {
         for boid in &self.boids {
-            draw(boid.hand, boid.position.x, boid.position.y);
+            draw(boid.hand, boid.position_x, boid.position_y);
         }
     }
 
-    pub fn update(&mut self, seperation_force: f32, cohesion_force: f32, align_force: f32, pred_force: f32, prey_force: f32) {
-        for i in 0..self.count {
-            let mut acceleration = Vector2::new(0.0, 0.0);
+    #[target_feature(enable = "simd128")]
+    pub fn update(&mut self, seperation_weight_single: f32, cohesion: f32, align: f32, pred: f32, prey: f32) {
+        let seperation_weight = f32x4(seperation_weight_single, seperation_weight_single, seperation_weight_single, seperation_weight_single);
+        let cohesion_weight = f32x4(cohesion, cohesion, cohesion, cohesion);
 
-            let mut average_position = Vector2::new(0.0, 0.0);
-            let mut average_velocity = Vector2::new(0.0, 0.0);
+        let vision_range = f32x4(VISION_RANGE, VISION_RANGE, VISION_RANGE, VISION_RANGE);
 
-            let mut prey_average_position = Vector2::new(0.0, 0.0);
-            let mut pred_average_position = Vector2::new(0.0, 0.0);
+        let one = u32x4(1, 1, 1, 1);
+        let eps = f32x4(1e-8, 1e-8, 1e-8, 1e-8);
 
-            let mut neighbor_count = 0;
+        let mut accelerations_x = vec![0.0; self.boids.len()];
+        let mut accelerations_y = vec![0.0; self.boids.len()];
 
-            let mut prey_count = 0;
-            let mut pred_count = 0;
-
-            let mut should_change = false;
-            let mut should_not_change = false;
-
-            let hash = unwrap_abort(self.boids.get(i)).hash;
+        for hash in 0..GRID_CNT {
+            let current_grid = unwrap_abort(self.table.get(hash)).clone();
 
             let mut iterator_vec = vec![unwrap_abort(self.table.get(hash)).iter()];
 
@@ -232,103 +182,146 @@ impl Flock {
                 iterator_vec.push(unwrap_abort(self.table.get((hash + GRID_ROWS + 1) % GRID_CNT)).iter());
             }
 
-            /*
-            let iterator = unwrap_abort(self.table.get(hash))
-                .iter()
-                .chain(unwrap_abort(self.table.get((hash - 1) % GRID_CNT)).iter())
-                .chain(unwrap_abort(self.table.get((hash + 1) % GRID_CNT)).iter())
-                .chain(unwrap_abort(self.table.get((hash - GRID_ROWS) % GRID_CNT)).iter())
-                .chain(unwrap_abort(self.table.get((hash + GRID_ROWS) % GRID_CNT)).iter())
-                .chain(unwrap_abort(self.table.get((hash - GRID_ROWS - 1) % GRID_CNT)).iter())
-                .chain(unwrap_abort(self.table.get((hash + GRID_ROWS - 1) % GRID_CNT)).iter())
-                .chain(unwrap_abort(self.table.get((hash - GRID_ROWS + 1) % GRID_CNT)).iter())
-                .chain(unwrap_abort(self.table.get((hash + GRID_ROWS + 1) % GRID_CNT)).iter());
-            */
-            
+            let main_iterator = current_grid.chunks_exact(4);
+
             let iterator = iterator_vec.iter().flat_map(|it| it.clone());
 
-            for j in iterator {
-                if i == *j {
-                    continue;
+            for i in main_iterator.clone() {
+                let mut acceleration_x = f32x4(0.0, 0.0, 0.0, 0.0);
+                let mut acceleration_y = f32x4(0.0, 0.0, 0.0, 0.0);
+
+                let mut average_position_x = f32x4(0.0, 0.0, 0.0, 0.0);
+                let mut average_position_y = f32x4(0.0, 0.0, 0.0, 0.0);
+
+                let mut average_velocity_x = f32x4(0.0, 0.0, 0.0, 0.0);
+                let mut average_velocity_y = f32x4(0.0, 0.0, 0.0, 0.0);
+
+                let mut neighbor_count = u32x4(0, 0, 0, 0);
+
+                let boid0 = &unwrap_abort(self.boids.get(*unwrap_abort(i.get(0))));
+                let boid1 = &unwrap_abort(self.boids.get(*unwrap_abort(i.get(1))));
+                let boid2 = &unwrap_abort(self.boids.get(*unwrap_abort(i.get(2))));
+                let boid3 = &unwrap_abort(self.boids.get(*unwrap_abort(i.get(3))));
+
+                let position_x = f32x4(boid0.position_x, boid1.position_x, boid2.position_x, boid3.position_x);
+                let position_y = f32x4(boid0.position_y, boid1.position_y, boid2.position_y, boid3.position_y);
+
+                for j in iterator.clone() {
+                    let other = &unwrap_abort(self.boids.get(*j));
+
+                    let other_position_x = f32x4(other.position_x, other.position_x, other.position_x, other.position_x);
+                    let other_position_y = f32x4(other.position_y, other.position_y, other.position_y, other.position_y);
+
+                    let other_velocity_x = f32x4(other.velocity_x, other.velocity_x, other.velocity_x, other.velocity_x);
+                    let other_velocity_y = f32x4(other.velocity_y, other.velocity_y, other.velocity_y, other.velocity_y);
+
+                    let is_same_hand = u32x4((boid0.hand == other.hand) as u32, (boid1.hand == other.hand) as u32, (boid2.hand == other.hand) as u32, (boid3.hand == other.hand) as u32);
+                    //let is_next_hand = u32x4((self0.hand == ((other0.hand + 1) % 3)) as u32, (self1.hand == ((other1.hand + 1) % 3)) as u32, (self2.hand == ((other2.hand + 1) % 3)) as u32, (self3.hand == ((other3.hand + 1) % 3)) as u32);
+                    //let is_prev_hand = u32x4((self0.hand == ((other0.hand + 2) % 3)) as u32, (self1.hand == ((other1.hand + 2) % 3)) as u32, (self2.hand == ((other2.hand + 2) % 3)) as u32, (self3.hand == ((other3.hand + 2) % 3)) as u32);
+
+                    let diff_x = f32x4_sub(position_x, other_position_x);
+                    let diff_y = f32x4_sub(position_y, other_position_y);
+
+                    let distance_squared = f32x4_add(f32x4_add(f32x4_mul(diff_x, diff_x), f32x4_mul(diff_y, diff_y)), eps);
+                    let distance = f32x4_sqrt(distance_squared);
+
+                    let is_in_range = f32x4_lt(distance, vision_range);
+
+                    let is_same_hand = u32x4_mul(is_same_hand, is_in_range);
+                    //let is_next_hand = u32x4_mul(is_next_hand, is_in_range);
+                    //let is_prev_hand = u32x4_mul(is_prev_hand, is_in_range);
+
+                    let seperation_relative_weight = f32x4_div(seperation_weight, distance);
+
+                    //log(f32x4_extract_lane::<0>(seperation_weight));
+
+                    acceleration_x = f32x4_add(acceleration_x, f32x4_mul(diff_x, seperation_relative_weight));
+                    acceleration_y = f32x4_add(acceleration_y, f32x4_mul(diff_y, seperation_relative_weight));
+
+                    average_position_x = f32x4_add(average_position_x, v128_and(other_position_x, is_same_hand));
+                    average_position_y = f32x4_add(average_position_y, v128_and(other_position_y, is_same_hand));
+
+                    average_velocity_x = f32x4_add(average_velocity_x, v128_and(other_velocity_x, is_same_hand));
+                    average_velocity_y = f32x4_add(average_velocity_y, v128_and(other_velocity_y, is_same_hand));
+
+                    neighbor_count = u32x4_add(neighbor_count, u32x4_mul(is_same_hand, one));
                 }
 
-                let boid = &unwrap_abort(self.boids.get(i));
-                let other = &unwrap_abort(self.boids.get(*j));
+                /*
+                let neighbor_count = f32x4_convert_u32x4(neighbor_count);
 
-                let distance = boid.position.distance_to(&other.position);
+                average_position_x = f32x4_div(average_position_x, neighbor_count);
+                average_position_y = f32x4_div(average_position_y, neighbor_count);
 
-                if distance >= VISION_RANGE {
-                    continue;
+                average_position_x = f32x4_sub(average_position_x, position_x);
+                average_position_y = f32x4_sub(average_position_y, position_y);
+
+                average_position_x = f32x4_mul(average_position_x, cohesion_weight);
+                average_position_y = f32x4_mul(average_position_y, cohesion_weight);
+
+                acceleration_x = f32x4_add(acceleration_x, average_position_x);
+                acceleration_y = f32x4_add(acceleration_y, average_position_y);
+                */
+
+                accelerations_x[*unwrap_abort(i.get(0))] = f32x4_extract_lane::<0>(acceleration_x);
+                accelerations_x[*unwrap_abort(i.get(1))] = f32x4_extract_lane::<1>(acceleration_x);
+                accelerations_x[*unwrap_abort(i.get(2))] = f32x4_extract_lane::<2>(acceleration_x);
+                accelerations_x[*unwrap_abort(i.get(3))] = f32x4_extract_lane::<3>(acceleration_x);
+
+                accelerations_y[*unwrap_abort(i.get(0))] = f32x4_extract_lane::<0>(acceleration_y);
+                accelerations_y[*unwrap_abort(i.get(1))] = f32x4_extract_lane::<1>(acceleration_y);
+                accelerations_y[*unwrap_abort(i.get(2))] = f32x4_extract_lane::<2>(acceleration_y);
+                accelerations_y[*unwrap_abort(i.get(3))] = f32x4_extract_lane::<3>(acceleration_y);
+
+            }
+
+            for i in main_iterator.remainder() {
+                let mut acceleration_x = 0.0;
+                let mut acceleration_y = 0.0;
+
+                let mut average_position_x = 0.0;
+                let mut average_position_y = 0.0;
+
+                let mut average_velocity_x = 0.0;
+                let mut average_velocity_y = 0.0;
+
+                let mut neighbor_count = 0;
+
+                let boid = &unwrap_abort(self.boids.get(*i));
+
+                for j in iterator.clone() {
+                    if i == j {
+                        continue;
+                    }
+
+                    let other = &unwrap_abort(self.boids.get(*j));
+
+                    let diff_x = boid.position_x - other.position_x;
+                    let diff_y = boid.position_y - other.position_y;
+
+                    let distance_squared = diff_x * diff_x + diff_y * diff_y;
+                    let distance = distance_squared.sqrt();
+
+                    let seperation_relative_weight = seperation_weight_single / distance;
+
+                    acceleration_x += diff_x * seperation_relative_weight;
+                    acceleration_y += diff_y * seperation_relative_weight;
                 }
 
-                if boid.hand == other.hand {
-                    let difference = boid.position.sub(other.position);
-
-                    acceleration
-                        .add_mut(difference.mul(seperation_force / difference.length_squared()));
-
-                    average_position.add_mut(other.position);
-                    average_velocity.add_mut(other.velocity);
-                    neighbor_count += 1;
-                }
-
-                if boid.hand == ((other.hand + 1) % 3) {
-                    should_change = (distance < CONVERT_RANGE) | should_change;
-                    pred_average_position.add_mut(other.position);
-                    pred_count += 1;
-                }
-
-                if boid.hand == ((other.hand + 2) % 3) {
-                    should_not_change = (distance < CONVERT_RANGE) | should_not_change;
-                    prey_average_position.add_mut(other.position);
-                    prey_count += 1;
-                }
+                accelerations_x[*i] = acceleration_x;
+                accelerations_y[*i] = acceleration_y;
             }
 
-            if neighbor_count > 0 {
-                average_position.mul_mut(1.0 / neighbor_count as f32);
-                average_position.sub_mut(unwrap_abort(self.boids.get(i)).position);
-                average_position.mul_mut(cohesion_force);
-
-                average_velocity.mul_mut(align_force / neighbor_count as f32);
-
-                acceleration.add_mut(average_position);
-                acceleration.add_mut(average_velocity);
-            }
-
-            if pred_count > 0 {
-                pred_average_position.mul_mut(1.0 / pred_count as f32);
-                pred_average_position.sub_mut(unwrap_abort(self.boids.get(i)).position);
-                pred_average_position.mul_mut(-pred_force);
-
-                acceleration.add_mut(pred_average_position);
-            }
-
-            if prey_count > 0 {
-                prey_average_position.mul_mut(1.0 / prey_count as f32);
-                prey_average_position.sub_mut(unwrap_abort(self.boids.get(i)).position);
-                prey_average_position.mul_mut(prey_force);
-
-                acceleration.add_mut(prey_average_position);
-            }
-
-            unwrap_abort(self.boids.get_mut(i)).update(acceleration);
-
-            if should_change && !should_not_change {
-                unwrap_abort(self.boids.get_mut(i)).hand =
-                    (unwrap_abort(self.boids.get(i)).hand + 2) % 3;
-            }
         }
 
-        self.table.iter_mut().for_each(|entry| entry.clear());
-        self.boids
-            .iter()
-            .enumerate()
-            .for_each(|(index, boid)| unwrap_abort(self.table.get_mut(boid.hash)).push(index));
+        for i in 0..self.boids.len() {
+            self.boids[i].update(accelerations_x[i], accelerations_y[i]);
+        }
     }
 }
 
 #[wasm_bindgen]
 extern "C" {
-    fn draw(c: u8, x: f32, y: f32);
+    fn draw(c: u32, x: f32, y: f32);
+    fn log(x: f32);
 }

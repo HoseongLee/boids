@@ -76,7 +76,7 @@ import init, { Flock } from "./pkg/wallpaper.js"
 
 await init();
 
-const BOID_COUNT = 9000;
+const BOID_COUNT = 3000;
 const SEPERATION_FORCE = 8.0;
 const COHESION_FORCE = 0.05;
 const ALIGN_FORCE = 0.2;
@@ -108,13 +108,14 @@ const ctx = canvas.getContext("2d");
 const flock = new Flock();
 
 for (let i=0; i < BOID_COUNT; ++i) {
-    flock.add_boid(Math.floor(Math.random() * 3), Math.random(), Math.random(), Math.random() * 2 - 1, Math.random() * 2 - 1);
+    flock.add_boid(0, Math.random() * 1620, Math.random() * 1080, Math.random() * 2 - 1, Math.random() * 2 - 1);
+    //flock.add_boid(Math.floor(Math.random() * 3), Math.random() * 1620, Math.random() * 1080, Math.random() * 2 - 1, Math.random() * 2 - 1);
 }
 
 let last = performance.now() / 1000;
 let fpsThreshold = 0;
 
-const fps = 30;
+const fps = 10;
 const spf = 1 / fps;
 
 function step() {
@@ -130,6 +131,8 @@ function step() {
     if (fpsThreshold < spf) {
         return;
     }
+
+    //console.log(fpsThreshold);
 
     fpsThreshold -= spf;
 
@@ -205,6 +208,10 @@ function draw(c, x, y) {
     else {
         ctx.drawImage(bCanvas, Math.round(x - half_size), Math.round(y - half_size));
     }
+}
+
+function log(x) {
+    console.log(x)
 }
         </script>
     </body>
